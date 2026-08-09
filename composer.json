@@ -1,0 +1,66 @@
+{
+    "name": "evanschleret/laravel-cors-resolver",
+    "description": "A dynamic, request-aware CORS policy resolver for Laravel applications",
+    "keywords": [
+        "laravel",
+        "cors",
+        "multi-tenant",
+        "multi-site",
+        "middleware",
+        "security"
+    ],
+    "homepage": "https://github.com/evanschleret/laravel-cors-resolver",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Evan Schleret",
+            "email": "evan@schleret.ch"
+        }
+    ],
+    "type": "library",
+    "require": {
+        "php": "^8.2",
+        "illuminate/contracts": "^12.0 || ^13.0",
+        "illuminate/http": "^12.0 || ^13.0",
+        "illuminate/support": "^12.0 || ^13.0",
+        "symfony/http-foundation": "^6.2 || ^7.0 || ^8.0"
+    },
+    "require-dev": {
+        "laravel/pint": "^1.20",
+        "orchestra/testbench": "^10.0 || ^11.0",
+        "phpstan/phpstan": "^1.11 || ^2.0",
+        "pestphp/pest": "^2.0 || ^3.0 || ^4.0",
+        "pestphp/pest-plugin-arch": "^2.0 || ^3.0 || ^4.0",
+        "pestphp/pest-plugin-laravel": "^2.0 || ^3.0 || ^4.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "EvanSchleret\\LaravelCorsResolver\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "EvanSchleret\\LaravelCorsResolver\\Providers\\LaravelCorsResolverServiceProvider"
+            ]
+        }
+    },
+    "scripts": {
+        "test": "vendor/bin/pest",
+        "format": "vendor/bin/pint",
+        "analyse": "vendor/bin/phpstan analyse"
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
