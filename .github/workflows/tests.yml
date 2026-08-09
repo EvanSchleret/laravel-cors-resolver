@@ -23,6 +23,16 @@ jobs:
           php-version: ${{ matrix.php }}
           extensions: mbstring, intl
           coverage: none
-      - run: composer update --prefer-dist --no-interaction --no-progress --with-all-dependencies "orchestra/testbench:${{ matrix.testbench }}"
+      - run: >-
+          composer update
+          --prefer-dist
+          --no-interaction
+          --no-progress
+          --with-all-dependencies
+          "orchestra/testbench:${{ matrix.testbench }}"
+          pestphp/pest
+          pestphp/pest-plugin-arch
+          pestphp/pest-plugin-laravel
+          phpunit/phpunit
       - run: composer test
       - run: composer analyse
