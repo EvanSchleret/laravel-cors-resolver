@@ -130,7 +130,7 @@ Laravel 12 and 13 applications configure middleware in `bootstrap/app.php`. The 
 ## Security model
 
 - Origins are compared as normalized, exact HTTP origins. Trailing slashes are removed, schemes and hosts are lowercased, and default ports are normalized.
-- Wildcards are explicit. `*` and `https://*.example.com` are supported, but no origin wildcard, method wildcard, or header wildcard can be combined with credentials.
+- Wildcards are explicit. `*` and `https://*.example.com` are supported. A subdomain wildcard matches exactly one DNS label, and no origin wildcard, method wildcard, or header wildcard can be combined with credentials.
 - Credentials always return the requesting origin, never `*`.
 - Unknown origins receive no CORS headers. Invalid preflights are denied by default.
 - `Vary: Origin` is added to actual CORS responses. Preflight responses also vary by `Access-Control-Request-Method` and `Access-Control-Request-Headers`.
