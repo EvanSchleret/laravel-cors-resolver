@@ -103,6 +103,30 @@ it('denies an invalid preflight without invoking the application', function (): 
     expect($response->getStatusCode())->toBe(403)->and($called)->toBeFalse();
 });
 
+it('rejects malformed requested headers even when the origin and method are allowed', function (): void {
+    $middleware = makeCorsMiddleware(new ClosureCorsResolver(
+        fn (Request $request): CorsPolicy => CorsPolicy::make()
+            ->allowOrigins(['https://example.com'])
+            ->allowMethods(['POST'])
+            ->allowHeaders(['Content-Type'])
+    ));
+    $called = false;
+
+    $response = $middleware->handle(
+        makeRequest('OPTIONS', 'https://example.com', [
+            'Access-Control-Request-Method' => 'POST',
+            'Access-Control-Request-Headers' => 'Content-Type, Invalid Header',
+        ]),
+        static function (Request $request) use (&$called): Response {
+            $called = true;
+
+            return new Response;
+        }
+    );
+
+    expect($response->getStatusCode())->toBe(403)->and($called)->toBeFalse();
+});
+
 it('supports credentials and rejects dangerous wildcards', function (): void {
     $policy = CorsPolicy::make()
         ->allowOrigins(['https://example.com'])

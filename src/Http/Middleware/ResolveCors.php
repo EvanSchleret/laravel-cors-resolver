@@ -53,11 +53,21 @@ final class ResolveCors
     private function handlePreflight(Request $request, Closure $next, CorsPolicy $policy, string $origin): Response
     {
         $requestedMethod = strtoupper(trim((string) $request->headers->get('Access-Control-Request-Method')));
+        $headersValid = true;
+
         try {
             $requestedHeaders = $this->requestedHeaders($request->headers->get('Access-Control-Request-Headers'));
         } catch (CorsConfigurationException) {
+            $headersValid = false;
             $requestedHeaders = [];
         }
+
+        if (! $headersValid) {
+            return new Response('', Response::HTTP_FORBIDDEN, [
+                'Vary' => 'Origin, Access-Control-Request-Method, Access-Control-Request-Headers',
+            ]);
+        }
+
         $allowed = $requestedMethod !== ''
             && $policy->allowsOrigin($origin)
             && $policy->allowsMethod($requestedMethod)

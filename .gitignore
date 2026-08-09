@@ -2,3 +2,4 @@
 /.phpunit.cache/
 /.phpstan.cache/
 /build/
+.idea
