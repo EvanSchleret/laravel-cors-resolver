@@ -2,10 +2,14 @@
 
 declare(strict_types=1);
 
+use EvanSchleret\LaravelCorsResolver\Cache\CorsPolicyCache;
 use EvanSchleret\LaravelCorsResolver\CorsPolicy;
 use EvanSchleret\LaravelCorsResolver\CorsResolverContext;
 use EvanSchleret\LaravelCorsResolver\Resolvers\ClosureCorsResolver;
 use EvanSchleret\LaravelCorsResolver\Resolvers\RouteParameterCorsResolver;
+use Illuminate\Cache\ArrayStore;
+use Illuminate\Cache\Repository as CacheRepository;
+use Illuminate\Contracts\Cache\Lock;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -208,6 +212,60 @@ it('does not cache when caching is disabled', function (): void {
     $middleware->handle($request, nextResponse());
 
     expect($count)->toBe(2);
+});
+
+it('rechecks the cache after acquiring a recomputation lock', function (): void {
+    $store = Mockery::mock(ArrayStore::class)->makePartial();
+    $repository = new CacheRepository($store);
+    $context = CorsResolverContext::fromRequest(makeRequest('GET', 'https://example.com'), 'resolver-a', ['api/*']);
+    $key = $context->cacheKey().':0';
+    $cachedPolicy = CorsPolicy::make()->allowOrigins(['https://peer.example.com']);
+    $lock = Mockery::mock(Lock::class);
+
+    $store->shouldReceive('lock')
+        ->once()
+        ->andReturn($lock);
+    $lock->shouldReceive('block')
+        ->once()
+        ->andReturnUsing(function (int $seconds, Closure $callback) use ($repository, $key, $cachedPolicy): CorsPolicy {
+            $repository->put($key, $cachedPolicy, 300);
+
+            return $callback();
+        });
+
+    $count = 0;
+    $cache = new CorsPolicyCache($repository, 300);
+    $result = $cache->remember($context, function () use (&$count): CorsPolicy {
+        $count++;
+
+        return CorsPolicy::make()->allowOrigins(['https://example.com']);
+    });
+
+    expect($result)->toBe($cachedPolicy)
+        ->and($count)->toBe(0);
+});
+
+it('falls back to recomputation when the cache lock times out', function (): void {
+    $store = new ArrayStore;
+    $repository = new CacheRepository($store);
+    $context = CorsResolverContext::fromRequest(makeRequest('GET', 'https://example.com'), 'resolver-a', ['api/*']);
+    $key = $context->cacheKey().':0';
+    $lock = $store->lock('laravel-cors-resolver:v1:lock:'.hash('sha256', $key), 10);
+    $lock->get();
+
+    try {
+        $count = 0;
+        $cache = new CorsPolicyCache($repository, 300, lockWaitSeconds: 0);
+        $cache->remember($context, function () use (&$count): CorsPolicy {
+            $count++;
+
+            return CorsPolicy::make()->allowOrigins(['https://example.com']);
+        });
+    } finally {
+        $lock->release();
+    }
+
+    expect($count)->toBe(1);
 });
 
 it('supports explicit cache invalidation', function (): void {

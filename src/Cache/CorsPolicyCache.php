@@ -7,6 +7,9 @@ namespace EvanSchleret\LaravelCorsResolver\Cache;
 use Closure;
 use EvanSchleret\LaravelCorsResolver\CorsPolicy;
 use EvanSchleret\LaravelCorsResolver\CorsResolverContext;
+use Illuminate\Contracts\Cache\Lock;
+use Illuminate\Contracts\Cache\LockProvider;
+use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Contracts\Cache\Repository;
 use InvalidArgumentException;
 
@@ -17,6 +20,8 @@ final class CorsPolicyCache
         private readonly int $ttl,
         private readonly string $namespace = 'laravel-cors-resolver',
         string|int $version = 'v1',
+        private readonly int $lockSeconds = 10,
+        private readonly int $lockWaitSeconds = 5,
     ) {
         if ($namespace === '' || preg_match('/^[A-Za-z0-9._-]+$/', $namespace) !== 1) {
             throw new InvalidArgumentException('The CORS cache namespace must contain only letters, numbers, dots, underscores, or hyphens.');
@@ -24,6 +29,10 @@ final class CorsPolicyCache
 
         if ((string) $version === '' || preg_match('/^[A-Za-z0-9._-]+$/', (string) $version) !== 1) {
             throw new InvalidArgumentException('The CORS cache version must contain only letters, numbers, dots, underscores, or hyphens.');
+        }
+
+        if ($lockSeconds < 0 || $lockWaitSeconds < 0) {
+            throw new InvalidArgumentException('The CORS cache lock durations cannot be negative.');
         }
 
         $this->version = (string) $version;
@@ -44,10 +53,25 @@ final class CorsPolicyCache
             return $cached;
         }
 
-        $policy = $resolver();
-        $this->store->put($key, $policy, $this->ttl);
+        $lock = $this->lock($key);
 
-        return $policy;
+        if ($lock === null) {
+            return $this->resolveAndStore($key, $resolver);
+        }
+
+        try {
+            return $lock->block($this->lockWaitSeconds, function () use ($key, $resolver): CorsPolicy {
+                $cached = $this->store->get($key);
+
+                if ($cached instanceof CorsPolicy) {
+                    return $cached;
+                }
+
+                return $this->resolveAndStore($key, $resolver);
+            });
+        } catch (LockTimeoutException) {
+            return $this->resolveAndStore($key, $resolver);
+        }
     }
 
     public function forget(CorsResolverContext $context): bool
@@ -110,5 +134,28 @@ final class CorsPolicyCache
     private function generationKey(string $scope, string $value): string
     {
         return $this->namespace.':'.$this->version.':generation:'.$scope.':'.hash('sha256', $value);
+    }
+
+    private function lock(string $key): ?Lock
+    {
+        if ($this->store === null || $this->lockSeconds === 0) {
+            return null;
+        }
+
+        $store = $this->store->getStore();
+
+        if (! $store instanceof LockProvider) {
+            return null;
+        }
+
+        return $store->lock($this->namespace.':'.$this->version.':lock:'.hash('sha256', $key), $this->lockSeconds);
+    }
+
+    private function resolveAndStore(string $key, Closure $resolver): CorsPolicy
+    {
+        $policy = $resolver();
+        $this->store?->put($key, $policy, $this->ttl);
+
+        return $policy;
     }
 }

@@ -16,5 +16,10 @@ return [
         'namespace' => 'laravel-cors-resolver',
         'version' => 'v1',
         'tenant_parameter' => null,
+        'lock' => [
+            'enabled' => true,
+            'ttl' => 10,
+            'wait' => 5,
+        ],
     ],
 ];

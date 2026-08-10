@@ -41,6 +41,11 @@ return [
         'namespace' => 'laravel-cors-resolver',
         'version' => 'v1',
         'tenant_parameter' => null,
+        'lock' => [
+            'enabled' => true,
+            'ttl' => 10,
+            'wait' => 5,
+        ],
     ],
 ];
 ```
@@ -48,6 +53,8 @@ return [
 `deny` returns `403` for an invalid or unresolved preflight and omits CORS headers from actual responses. `passthrough` lets an invalid preflight reach the application without adding CORS headers. Both modes fail closed from the browser's point of view.
 
 Caching is disabled by default. Enable it only when the resolver's result is stable for the request fingerprint and invalidate entries when external tenant configuration changes. `namespace` and `version` isolate this package's keys from other applications and provide a simple cache migration mechanism. Set `tenant_parameter` to a route parameter name when policies are tenant-specific, for example `tenant` or `account`.
+
+When caching is enabled, supported Laravel lock stores protect cache misses from concurrent recomputation. `lock.ttl` must exceed the expected resolver duration, and `lock.wait` controls how long another request waits for the lock. If the store does not support locks or the lock times out, the resolver runs normally and the request is not failed because caching is only an optimization. Set `lock.enabled` to `false` to disable this protection.
 
 ## A simple resolver
 

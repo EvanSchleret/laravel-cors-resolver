@@ -56,6 +56,10 @@ final class LaravelCorsResolverServiceProvider extends ServiceProvider
             $storeName = $configuration['store'] ?? null;
             $namespace = (string) ($configuration['namespace'] ?? 'laravel-cors-resolver');
             $version = $configuration['version'] ?? 'v1';
+            $lockConfiguration = $configuration['lock'] ?? [];
+            $lockEnabled = is_array($lockConfiguration) && (bool) ($lockConfiguration['enabled'] ?? true);
+            $lockSeconds = $lockEnabled ? max(1, (int) ($lockConfiguration['ttl'] ?? 10)) : 0;
+            $lockWaitSeconds = $lockEnabled ? max(0, (int) ($lockConfiguration['wait'] ?? 5)) : 0;
             $store = $storeName === null
                 ? $app->make('cache.store')
                 : $app->make('cache')->store($storeName);
@@ -64,7 +68,7 @@ final class LaravelCorsResolverServiceProvider extends ServiceProvider
                 throw new InvalidArgumentException('The configured CORS cache store must implement the cache repository contract.');
             }
 
-            return new CorsPolicyCache($store, $ttl, $namespace, $version);
+            return new CorsPolicyCache($store, $ttl, $namespace, $version, $lockSeconds, $lockWaitSeconds);
         });
     }
 
