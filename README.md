@@ -38,13 +38,16 @@ return [
         'enabled' => true,
         'store' => null,
         'ttl' => 300,
+        'namespace' => 'laravel-cors-resolver',
+        'version' => 'v1',
+        'tenant_parameter' => null,
     ],
 ];
 ```
 
 `deny` returns `403` for an invalid or unresolved preflight and omits CORS headers from actual responses. `passthrough` lets an invalid preflight reach the application without adding CORS headers. Both modes fail closed from the browser's point of view.
 
-Caching is disabled by default. Enable it only when the resolver's result is stable for the request fingerprint and invalidate entries when external tenant configuration changes.
+Caching is disabled by default. Enable it only when the resolver's result is stable for the request fingerprint and invalidate entries when external tenant configuration changes. `namespace` and `version` isolate this package's keys from other applications and provide a simple cache migration mechanism. Set `tenant_parameter` to a route parameter name when policies are tenant-specific, for example `tenant` or `account`.
 
 ## A simple resolver
 
@@ -153,6 +156,19 @@ $context = CorsResolverContext::fromRequest(
 
 app(CorsPolicyCache::class)->forget($context);
 ```
+
+Invalidate every cached policy for a resolver or tenant when its CORS configuration changes:
+
+```php
+app(CorsPolicyCache::class)->invalidateResolver(SiteCorsResolver::class);
+app(CorsPolicyCache::class)->invalidateTenant((string) $tenant->getRouteKey());
+app(CorsPolicyCache::class)->invalidateTenant(
+    (string) $tenant->getRouteKey(),
+    SiteCorsResolver::class,
+);
+```
+
+Resolver and tenant invalidation uses persistent generation keys, so it works with cache stores that do not support tags. Existing policy entries become unreachable immediately and expire normally according to their configured TTL.
 
 Do not cache policies that depend on mutable state not represented by the request fingerprint unless your application invalidates the entry when that state changes.
 

@@ -13,5 +13,8 @@ return [
         'enabled' => false,
         'store' => null,
         'ttl' => 300,
+        'namespace' => 'laravel-cors-resolver',
+        'version' => 'v1',
+        'tenant_parameter' => null,
     ],
 ];

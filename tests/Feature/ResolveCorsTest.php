@@ -229,6 +229,131 @@ it('supports explicit cache invalidation', function (): void {
     expect($count)->toBe(2);
 });
 
+it('includes the cache namespace, version, and tenant in the context key', function (): void {
+    $request = makeRequest('GET', 'https://example.com');
+    $first = CorsResolverContext::fromRequest(
+        $request,
+        ClosureCorsResolver::class,
+        ['api/*'],
+        'tenant-cors',
+        'v2',
+        'tenant-a',
+    );
+    $second = CorsResolverContext::fromRequest(
+        $request,
+        ClosureCorsResolver::class,
+        ['api/*'],
+        'tenant-cors',
+        'v2',
+        'tenant-b',
+    );
+
+    expect($first->cacheKey())->toStartWith('tenant-cors:v2:')
+        ->and($first->cacheKey())->not->toBe($second->cacheKey())
+        ->and($first->tenantKey())->toBe('tenant-a');
+});
+
+it('invalidates all cached policies for a resolver', function (): void {
+    $count = 0;
+    $cache = cachedCorsPolicyCache();
+    $request = makeRequest('GET', 'https://example.com');
+    $context = CorsResolverContext::fromRequest($request, ClosureCorsResolver::class, ['api/*']);
+    $resolve = function () use (&$count): CorsPolicy {
+        $count++;
+
+        return CorsPolicy::make()->allowOrigins(['https://example.com']);
+    };
+
+    $cache->remember($context, $resolve);
+    $cache->remember($context, $resolve);
+    $cache->invalidateResolver(ClosureCorsResolver::class);
+    $cache->remember($context, $resolve);
+
+    expect($count)->toBe(2);
+});
+
+it('invalidates cached policies for one tenant without affecting another', function (): void {
+    $count = 0;
+    $cache = cachedCorsPolicyCache();
+    $request = makeRequest('GET', 'https://example.com');
+    $tenantA = CorsResolverContext::fromRequest($request, ClosureCorsResolver::class, ['api/*'], tenantKey: 'tenant-a');
+    $tenantB = CorsResolverContext::fromRequest($request, ClosureCorsResolver::class, ['api/*'], tenantKey: 'tenant-b');
+    $resolve = function () use (&$count): CorsPolicy {
+        $count++;
+
+        return CorsPolicy::make()->allowOrigins(['https://example.com']);
+    };
+
+    $cache->remember($tenantA, $resolve);
+    $cache->remember($tenantB, $resolve);
+    $cache->invalidateTenant('tenant-a');
+    $cache->remember($tenantA, $resolve);
+    $cache->remember($tenantB, $resolve);
+
+    expect($count)->toBe(3);
+});
+
+it('invalidates a tenant policy for one resolver only', function (): void {
+    $count = 0;
+    $cache = cachedCorsPolicyCache();
+    $request = makeRequest('GET', 'https://example.com');
+    $firstResolver = CorsResolverContext::fromRequest($request, 'resolver-a', ['api/*'], tenantKey: 'tenant-a');
+    $secondResolver = CorsResolverContext::fromRequest($request, 'resolver-b', ['api/*'], tenantKey: 'tenant-a');
+    $resolve = function () use (&$count): CorsPolicy {
+        $count++;
+
+        return CorsPolicy::make()->allowOrigins(['https://example.com']);
+    };
+
+    $cache->remember($firstResolver, $resolve);
+    $cache->remember($secondResolver, $resolve);
+    $cache->invalidateTenant('tenant-a', 'resolver-a');
+    $cache->remember($firstResolver, $resolve);
+    $cache->remember($secondResolver, $resolve);
+
+    expect($count)->toBe(3);
+});
+
+it('uses the configured route parameter as the tenant cache scope', function (): void {
+    $count = 0;
+    $resolver = new ClosureCorsResolver(function (Request $request) use (&$count): CorsPolicy {
+        $count++;
+
+        return CorsPolicy::make()->allowOrigins(['https://example.com']);
+    });
+    $cache = cachedCorsPolicyCache();
+    $configuration = [
+        'cors-resolver' => [
+            'paths' => ['api/*'],
+            'failure_mode' => 'deny',
+            'cache' => ['tenant_parameter' => 'tenant'],
+        ],
+    ];
+    $middleware = makeCorsMiddleware($resolver, $cache, $configuration);
+    $firstRequest = makeRequest('GET', 'https://example.com');
+    $firstRequest->setRouteResolver(static fn (): object => new class
+    {
+        public function parameter(string $name): string
+        {
+            return 'tenant-a';
+        }
+    });
+    $secondRequest = makeRequest('GET', 'https://example.com');
+    $secondRequest->setRouteResolver(static fn (): object => new class
+    {
+        public function parameter(string $name): string
+        {
+            return 'tenant-b';
+        }
+    });
+
+    $middleware->handle($firstRequest, nextResponse());
+    $middleware->handle($firstRequest, nextResponse());
+    $middleware->handle($secondRequest, nextResponse());
+
+    expect($count)->toBe(2);
+});
+
 it('adds CORS headers to application error responses', function (): void {
     $middleware = makeCorsMiddleware(new ClosureCorsResolver(
         fn (Request $request): CorsPolicy => CorsPolicy::make()->allowOrigins(['https://example.com'])

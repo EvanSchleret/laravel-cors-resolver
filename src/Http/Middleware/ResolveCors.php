@@ -33,7 +33,14 @@ final class ResolveCors
         }
 
         $paths = $this->configuredPaths();
-        $context = CorsResolverContext::fromRequest($request, get_class($this->resolver), $paths);
+        $context = CorsResolverContext::fromRequest(
+            $request,
+            get_class($this->resolver),
+            $paths,
+            $this->cacheNamespace(),
+            $this->cacheVersion(),
+            $this->tenantKey($request),
+        );
         $policy = $this->cache->remember($context, fn (): CorsPolicy => $this->resolver->resolve($request));
 
         if ($request->isMethod('OPTIONS')) {
@@ -172,6 +179,50 @@ final class ResolveCors
         }
 
         return array_values(array_filter($paths, static fn (mixed $path): bool => is_string($path) && $path !== ''));
+    }
+
+    private function cacheNamespace(): string
+    {
+        $configuration = $this->config->get('cors-resolver.cache', []);
+
+        return is_array($configuration) && is_string($configuration['namespace'] ?? null)
+            ? $configuration['namespace']
+            : 'laravel-cors-resolver';
+    }
+
+    private function cacheVersion(): string
+    {
+        $configuration = $this->config->get('cors-resolver.cache', []);
+
+        return is_array($configuration) && is_string($configuration['version'] ?? null)
+            ? $configuration['version']
+            : 'v1';
+    }
+
+    private function tenantKey(Request $request): ?string
+    {
+        $configuration = $this->config->get('cors-resolver.cache', []);
+        $parameter = is_array($configuration) ? $configuration['tenant_parameter'] ?? null : null;
+
+        if (! is_string($parameter) || $parameter === '') {
+            return null;
+        }
+
+        $tenant = $request->route($parameter);
+
+        if (is_string($tenant)) {
+            return (string) $tenant;
+        }
+
+        if (is_object($tenant) && method_exists($tenant, 'getRouteKey')) {
+            $key = $tenant->getRouteKey();
+
+            if (is_string($key) || is_int($key)) {
+                return (string) $key;
+            }
+        }
+
+        return null;
     }
 
     private function failureMode(): string

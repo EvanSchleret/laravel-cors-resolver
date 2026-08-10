@@ -5,8 +5,8 @@
 - `CorsPolicy` is an immutable value object. It normalizes configuration, validates wildcard and credential combinations, and performs strict origin, method, and header checks.
 - `CorsResolver` is the only required extension point. It receives the current `Illuminate\Http\Request` and returns a `CorsPolicy`.
 - `ResolveCors` owns path matching, preflight handling, response header emission, and failure behavior. It has no request state on its object instance, which makes it safe for Octane and long-lived workers.
-- `CorsResolverContext` creates a deterministic, hashed request context for cache keys.
-- `CorsPolicyCache` is an optional adapter around Laravel's cache repository. It never mutates configuration and exposes explicit invalidation by context or key.
+- `CorsResolverContext` creates a deterministic, hashed request context for namespaced and versioned cache keys, including an optional tenant scope.
+- `CorsPolicyCache` is an optional adapter around Laravel's cache repository. It never mutates configuration and exposes explicit invalidation by context, key, resolver, or tenant through persistent generations.
 - `ClosureCorsResolver` and `RouteParameterCorsResolver` cover common adapters without requiring Eloquent or a database dependency.
 - `LaravelCorsResolverServiceProvider` merges and publishes configuration, resolves the configured resolver, configures the optional cache, and registers the `cors.resolve` alias.
 
