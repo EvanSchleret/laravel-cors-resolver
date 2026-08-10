@@ -10,11 +10,13 @@ use EvanSchleret\LaravelCorsResolver\CorsPolicy;
 use EvanSchleret\LaravelCorsResolver\CorsResolver;
 use EvanSchleret\LaravelCorsResolver\CorsResolverContext;
 use EvanSchleret\LaravelCorsResolver\Exceptions\CorsConfigurationException;
+use EvanSchleret\LaravelCorsResolver\Exceptions\CorsResolverException;
 use EvanSchleret\LaravelCorsResolver\Support\OriginNormalizer;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\Response;
+use Throwable;
 
 final class ResolveCors
 {
@@ -41,7 +43,11 @@ final class ResolveCors
             $this->cacheVersion(),
             $this->tenantKey($request),
         );
-        $policy = $this->cache->remember($context, fn (): CorsPolicy => $this->resolver->resolve($request));
+        try {
+            $policy = $this->cache->remember($context, fn (): CorsPolicy => $this->resolvePolicy($request));
+        } catch (CorsResolverException $exception) {
+            return $this->handleResolverException($request, $exception);
+        }
 
         if ($request->isMethod('OPTIONS')) {
             return $this->handlePreflight($request, $next, $policy, $origin);
@@ -234,6 +240,46 @@ final class ResolveCors
         }
 
         return $mode;
+    }
+
+    private function resolverExceptionMode(): string
+    {
+        $mode = (string) $this->config->get('cors-resolver.resolver_exception_mode', 'deny');
+
+        if (! in_array($mode, ['deny', 'throw'], true)) {
+            throw new CorsConfigurationException('cors-resolver.resolver_exception_mode must be deny or throw.');
+        }
+
+        return $mode;
+    }
+
+    private function resolvePolicy(Request $request): CorsPolicy
+    {
+        try {
+            return $this->resolver->resolve($request);
+        } catch (Throwable $exception) {
+            throw new CorsResolverException($exception);
+        }
+    }
+
+    private function handleResolverException(Request $request, CorsResolverException $exception): Response
+    {
+        if ($this->resolverExceptionMode() === 'throw') {
+            $previous = $exception->getPrevious();
+
+            if ($previous instanceof Throwable) {
+                throw $previous;
+            }
+
+            throw $exception;
+        }
+
+        $response = new Response('', Response::HTTP_SERVICE_UNAVAILABLE);
+        $this->addVary($response, $request->isMethod('OPTIONS')
+            ? ['Origin', 'Access-Control-Request-Method', 'Access-Control-Request-Headers']
+            : ['Origin']);
+
+        return $response;
     }
 
     /** @param list<string> $values */

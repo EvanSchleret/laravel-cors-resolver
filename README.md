@@ -34,6 +34,7 @@ return [
     'paths' => ['api/*'],
     'resolver' => App\Cors\SiteCorsResolver::class,
     'failure_mode' => 'deny',
+    'resolver_exception_mode' => 'deny',
     'cache' => [
         'enabled' => true,
         'store' => null,
@@ -51,6 +52,10 @@ return [
 ```
 
 `deny` returns `403` for an invalid or unresolved preflight and omits CORS headers from actual responses. `passthrough` lets an invalid preflight reach the application without adding CORS headers. Both modes fail closed from the browser's point of view.
+
+Configuration is validated while the service provider registers. Invalid paths, resolver declarations, failure modes, cache settings, namespaces, versions, and lock durations fail startup with a `CorsConfigurationException` instead of being silently coerced.
+
+Resolver exceptions use `resolver_exception_mode`. The default `deny` mode returns `503 Service Unavailable`, adds only the appropriate `Vary` headers, does not invoke the application, and does not expose the exception. `throw` rethrows the original exception to Laravel's exception handler. Cache failures are not treated as resolver failures and are allowed to propagate.
 
 Caching is disabled by default. Enable it only when the resolver's result is stable for the request fingerprint and invalidate entries when external tenant configuration changes. `namespace` and `version` isolate this package's keys from other applications and provide a simple cache migration mechanism. Set `tenant_parameter` to a route parameter name when policies are tenant-specific, for example `tenant` or `account`.
 

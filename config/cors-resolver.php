@@ -9,6 +9,8 @@ return [
 
     'failure_mode' => 'deny',
 
+    'resolver_exception_mode' => 'deny',
+
     'cache' => [
         'enabled' => false,
         'store' => null,

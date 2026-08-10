@@ -214,6 +214,51 @@ it('does not cache when caching is disabled', function (): void {
     expect($count)->toBe(2);
 });
 
+it('fails closed when a resolver throws', function (): void {
+    $nextCalled = false;
+    $middleware = makeCorsMiddleware(
+        new ClosureCorsResolver(function (Request $request): CorsPolicy {
+            throw new RuntimeException('resolver failed');
+        }),
+        configuration: [
+            'cors-resolver' => [
+                'paths' => ['api/*'],
+                'failure_mode' => 'deny',
+                'resolver_exception_mode' => 'deny',
+            ],
+        ],
+    );
+
+    $response = $middleware->handle(makeRequest('GET', 'https://example.com'), function (Request $request) use (&$nextCalled): Response {
+        $nextCalled = true;
+
+        return nextResponse()($request);
+    });
+
+    expect($response->getStatusCode())->toBe(Response::HTTP_SERVICE_UNAVAILABLE)
+        ->and($response->headers->get('Vary'))->toBe('Origin')
+        ->and($response->headers->has('Access-Control-Allow-Origin'))->toBeFalse()
+        ->and($nextCalled)->toBeFalse();
+});
+
+it('rethrows resolver exceptions when configured to throw', function (): void {
+    $middleware = makeCorsMiddleware(
+        new ClosureCorsResolver(function (Request $request): CorsPolicy {
+            throw new RuntimeException('resolver failed');
+        }),
+        configuration: [
+            'cors-resolver' => [
+                'paths' => ['api/*'],
+                'failure_mode' => 'deny',
+                'resolver_exception_mode' => 'throw',
+            ],
+        ],
+    );
+
+    expect(fn (): Response => $middleware->handle(makeRequest('GET', 'https://example.com'), nextResponse()))
+        ->toThrow(RuntimeException::class, 'resolver failed');
+});
+
 it('rechecks the cache after acquiring a recomputation lock', function (): void {
     $store = Mockery::mock(ArrayStore::class)->makePartial();
     $repository = new CacheRepository($store);
