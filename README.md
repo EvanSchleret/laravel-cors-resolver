@@ -2,7 +2,7 @@
 
 Dynamic, request-aware CORS policies for Laravel applications.
 
-Status: active development.
+Status: stable.
 
 `evanschleret/laravel-cors-resolver` is designed for multi-tenant and multi-site applications where the allowed origins, methods, and headers depend on the current request. It supports the Laravel 12 and 13 major versions that are currently within Laravel's official support window.
 
