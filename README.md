@@ -206,10 +206,10 @@ Do not cache policies that depend on mutable state not represented by the reques
 
 | Laravel | PHP | Testbench |
 | --- | --- | --- |
-| 12 | 8.2–8.5 | 10 |
+| 12 | 8.3–8.5 | 10 |
 | 13 | 8.3–8.5 | 11 |
 
-Laravel 13 requires PHP 8.3. The package advertises PHP 8.2+ so it remains installable on Laravel 12 with PHP 8.2 and on Laravel 13 with PHP 8.3+.
+The package requires PHP 8.3 or newer. Laravel 13 officially supports PHP 8.3 through 8.5.
 
 See Laravel's [Laravel 12 support policy](https://laravel.com/docs/12.x/releases#support-policy) and [Laravel 13 release notes](https://laravel.com/docs/13.x/releases) for the framework's current support window.
 
@@ -218,9 +218,11 @@ See Laravel's [Laravel 12 support policy](https://laravel.com/docs/12.x/releases
 ```bash
 composer install
 composer test
+composer test:coverage
 composer format
 composer analyse
 composer validate
+composer audit --locked
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines and [SECURITY.md](SECURITY.md) for private vulnerability reporting.

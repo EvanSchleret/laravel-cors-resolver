@@ -28,4 +28,4 @@ Laravel 12 and 13 applications configure the global stack and aliases in `bootst
 
 ## Compatibility decisions
 
-The core depends on Laravel HTTP contracts and Symfony's stable response abstraction. It does not import Eloquent, database models, Fruitcake, or internal Laravel middleware classes. Laravel 13 support is constrained by Laravel's own PHP 8.3 requirement; the package's PHP constraint remains `^8.2` for Laravel 12.
+The core depends on Laravel HTTP contracts and Symfony's stable response abstraction. It does not import Eloquent, database models, Fruitcake, or internal Laravel middleware classes. The package requires PHP 8.3 or newer and tests Laravel 12 with Testbench 10 and Laravel 13 with Testbench 11 on PHP 8.3, 8.4, and 8.5.
