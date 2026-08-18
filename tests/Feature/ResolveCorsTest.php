@@ -45,6 +45,19 @@ it('does not add headers for an unknown origin', function (): void {
         ->and($response->headers->get('Vary'))->toBe('Origin');
 });
 
+it('does not add headers when the actual request method is denied', function (): void {
+    $middleware = makeCorsMiddleware(new ClosureCorsResolver(
+        fn (Request $request): CorsPolicy => CorsPolicy::make()
+            ->allowOrigins(['https://example.com'])
+            ->allowMethods(['POST'])
+    ));
+
+    $response = $middleware->handle(makeRequest('GET', 'https://example.com'), nextResponse());
+
+    expect($response->getStatusCode())->toBe(200)
+        ->and($response->headers->has('Access-Control-Allow-Origin'))->toBeFalse();
+});
+
 it('handles an allowed preflight', function (): void {
     $middleware = makeCorsMiddleware(new ClosureCorsResolver(
         fn (Request $request): CorsPolicy => CorsPolicy::make()
@@ -133,6 +146,52 @@ it('rejects malformed requested headers even when the origin and method are allo
     );
 
     expect($response->getStatusCode())->toBe(403)->and($called)->toBeFalse();
+});
+
+it('denies preflights with missing or unauthorized request details', function (): void {
+    $middleware = makeCorsMiddleware(new ClosureCorsResolver(
+        fn (Request $request): CorsPolicy => CorsPolicy::make()
+            ->allowOrigins(['https://example.com'])
+            ->allowMethods(['POST'])
+            ->allowHeaders(['Content-Type'])
+    ));
+
+    $missingMethod = $middleware->handle(
+        makeRequest('OPTIONS', 'https://example.com'),
+        nextResponse(),
+    );
+    $unauthorizedHeader = $middleware->handle(
+        makeRequest('OPTIONS', 'https://example.com', [
+            'Access-Control-Request-Method' => 'POST',
+            'Access-Control-Request-Headers' => 'Authorization',
+        ]),
+        nextResponse(),
+    );
+
+    expect($missingMethod->getStatusCode())->toBe(403)
+        ->and($unauthorizedHeader->getStatusCode())->toBe(403);
+});
+
+it('passes denied preflights through when configured', function (): void {
+    $middleware = makeCorsMiddleware(
+        new ClosureCorsResolver(
+            fn (Request $request): CorsPolicy => CorsPolicy::make()->allowOrigins(['https://example.com'])
+        ),
+        configuration: [
+            'cors-resolver' => [
+                'paths' => ['api/*'],
+                'failure_mode' => 'passthrough',
+            ],
+        ],
+    );
+
+    $response = $middleware->handle(
+        makeRequest('OPTIONS', 'https://unknown.example', ['Access-Control-Request-Method' => 'POST']),
+        nextResponse(418),
+    );
+
+    expect($response->getStatusCode())->toBe(418)
+        ->and($response->headers->get('Vary'))->toBe('Origin, Access-Control-Request-Method, Access-Control-Request-Headers');
 });
 
 it('supports credentials and rejects dangerous wildcards', function (): void {
@@ -263,6 +322,29 @@ it('rethrows resolver exceptions when configured to throw', function (): void {
         ->toThrow(RuntimeException::class, 'resolver failed');
 });
 
+it('fails closed for an exception raised during an OPTIONS request', function (): void {
+    $middleware = makeCorsMiddleware(
+        new ClosureCorsResolver(function (Request $request): CorsPolicy {
+            throw new RuntimeException('resolver failed');
+        }),
+        configuration: [
+            'cors-resolver' => [
+                'paths' => ['api/*'],
+                'failure_mode' => 'deny',
+                'resolver_exception_mode' => 'deny',
+            ],
+        ],
+    );
+
+    $response = $middleware->handle(
+        makeRequest('OPTIONS', 'https://example.com', ['Access-Control-Request-Method' => 'GET']),
+        nextResponse(),
+    );
+
+    expect($response->getStatusCode())->toBe(Response::HTTP_SERVICE_UNAVAILABLE)
+        ->and($response->headers->get('Vary'))->toBe('Origin, Access-Control-Request-Method, Access-Control-Request-Headers');
+});
+
 it('dispatches an event when a CORS request is denied', function (): void {
     $events = Mockery::mock(Dispatcher::class);
     $events->shouldReceive('dispatch')
@@ -362,6 +444,25 @@ it('dispatches an event when a cached policy is missed', function (): void {
     $context = CorsResolverContext::fromRequest(makeRequest('GET', 'https://example.com'), 'resolver-a', ['api/*']);
 
     $cache->remember($context, static fn (): CorsPolicy => CorsPolicy::make()->allowOrigins(['https://example.com']));
+});
+
+it('continues when observability dispatchers fail', function (): void {
+    $events = Mockery::mock(Dispatcher::class);
+    $events->shouldReceive('dispatch')->once()->andThrow(new RuntimeException('event failed'));
+    $cache = new CorsPolicyCache(new CacheRepository(new ArrayStore), 300, events: $events);
+    $context = CorsResolverContext::fromRequest(makeRequest('GET', 'https://example.com'), 'resolver-a', ['api/*']);
+
+    expect($cache->remember($context, static fn (): CorsPolicy => CorsPolicy::make()))
+        ->toBeInstanceOf(CorsPolicy::class);
+});
+
+it('does not dispatch cache events when observability is disabled', function (): void {
+    $events = Mockery::mock(Dispatcher::class);
+    $events->shouldNotReceive('dispatch');
+    $cache = new CorsPolicyCache(new CacheRepository(new ArrayStore), 300, events: $events, eventsEnabled: false);
+    $context = CorsResolverContext::fromRequest(makeRequest('GET', 'https://example.com'), 'resolver-a', ['api/*']);
+
+    $cache->remember($context, static fn (): CorsPolicy => CorsPolicy::make());
 });
 
 it('falls back to recomputation when the cache lock times out', function (): void {
@@ -529,6 +630,44 @@ it('uses the configured route parameter as the tenant cache scope', function ():
     $middleware->handle($secondRequest, nextResponse());
 
     expect($count)->toBe(2);
+});
+
+it('uses an object route key as the tenant cache scope', function (): void {
+    $middleware = makeCorsMiddleware(
+        new ClosureCorsResolver(
+            fn (Request $request): CorsPolicy => CorsPolicy::make()->allowOrigins(['https://example.com'])
+        ),
+        cachedCorsPolicyCache(),
+        [
+            'cors-resolver' => [
+                'paths' => ['api/*'],
+                'failure_mode' => 'deny',
+                'cache' => [
+                    'tenant_parameter' => 'tenant',
+                    'namespace' => 'tenant-cache',
+                    'version' => 'v2',
+                ],
+            ],
+        ],
+    );
+    $request = makeRequest('GET', 'https://example.com');
+    $request->setRouteResolver(static fn (): object => new class
+    {
+        public function parameter(string $name): object
+        {
+            return new class
+            {
+                public function getRouteKey(): int
+                {
+                    return 42;
+                }
+            };
+        }
+    });
+
+    $response = $middleware->handle($request, nextResponse());
+
+    expect($response->headers->get('Access-Control-Allow-Origin'))->toBe('https://example.com');
 });
 
 it('adds CORS headers to application error responses', function (): void {
