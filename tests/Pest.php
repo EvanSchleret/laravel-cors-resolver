@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use EvanSchleret\LaravelCorsResolver\Cache\CorsPolicyCache;
+use EvanSchleret\LaravelCorsResolver\CorsFailureResponse;
 use EvanSchleret\LaravelCorsResolver\CorsResolver;
 use EvanSchleret\LaravelCorsResolver\Http\Middleware\ResolveCors;
 use Illuminate\Cache\ArrayStore;
@@ -15,7 +16,7 @@ use Tests\TestCase;
 
 uses(TestCase::class)->in('Feature');
 
-function makeCorsMiddleware(CorsResolver $resolver, ?CorsPolicyCache $cache = null, array $configuration = [], ?Dispatcher $events = null): ResolveCors
+function makeCorsMiddleware(CorsResolver $resolver, ?CorsPolicyCache $cache = null, array $configuration = [], ?Dispatcher $events = null, ?CorsFailureResponse $failureResponse = null): ResolveCors
 {
     $config = new ConfigRepository(array_merge([
         'cors-resolver' => [
@@ -24,7 +25,7 @@ function makeCorsMiddleware(CorsResolver $resolver, ?CorsPolicyCache $cache = nu
         ],
     ], $configuration));
 
-    return new ResolveCors($resolver, $cache ?? new CorsPolicyCache(null, 0), $config, $events);
+    return new ResolveCors($resolver, $cache ?? new CorsPolicyCache(null, 0), $config, $events, $failureResponse);
 }
 
 function makeRequest(string $method, string $origin, array $headers = []): Request

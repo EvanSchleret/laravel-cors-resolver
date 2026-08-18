@@ -11,6 +11,8 @@ return [
 
     'resolver_exception_mode' => 'deny',
 
+    'failure_response' => null,
+
     'observability' => [
         'enabled' => true,
     ],

@@ -47,7 +47,7 @@ it('handles an allowed preflight through the HTTP kernel', function (): void {
         ->assertHeader('Access-Control-Allow-Origin', 'https://example.com')
         ->assertHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
         ->assertHeader('Access-Control-Allow-Headers', 'content-type, x-request-id')
-        ->assertHeader('Vary', 'Origin, Access-Control-Request-Method, Access-Control-Request-Headers');
+        ->assertHeader('Vary', 'Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Access-Control-Request-Private-Network');
 });
 
 it('denies an unknown origin through the HTTP kernel', function (): void {
@@ -59,6 +59,6 @@ it('denies an unknown origin through the HTTP kernel', function (): void {
     ])->options('/api/resource');
 
     $response->assertForbidden()
-        ->assertHeader('Vary', 'Origin, Access-Control-Request-Method, Access-Control-Request-Headers')
+        ->assertHeader('Vary', 'Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Access-Control-Request-Private-Network')
         ->assertHeaderMissing('Access-Control-Allow-Origin');
 });

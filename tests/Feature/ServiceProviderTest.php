@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use EvanSchleret\LaravelCorsResolver\Cache\CorsPolicyCache;
+use EvanSchleret\LaravelCorsResolver\CorsFailure;
+use EvanSchleret\LaravelCorsResolver\CorsFailureResponse;
 use EvanSchleret\LaravelCorsResolver\CorsPolicy;
 use EvanSchleret\LaravelCorsResolver\CorsResolver;
 use EvanSchleret\LaravelCorsResolver\Exceptions\CorsConfigurationException;
@@ -10,6 +12,7 @@ use EvanSchleret\LaravelCorsResolver\Providers\LaravelCorsResolverServiceProvide
 use EvanSchleret\LaravelCorsResolver\Resolvers\ClosureCorsResolver;
 use EvanSchleret\LaravelCorsResolver\Resolvers\NullCorsResolver;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\Response;
 
 it('validates the resolver configuration during provider registration', function (): void {
     $this->app['config']->set('cors-resolver.resolver_exception_mode', 'invalid');
@@ -72,6 +75,30 @@ it('resolves a configured resolver class from the container', function (): void 
     expect($this->app->make(CorsResolver::class))->toBeInstanceOf(ProviderTestCorsResolver::class);
 });
 
+it('resolves a configured failure response class from the container', function (): void {
+    $this->app['config']->set('cors-resolver.failure_response', ProviderTestFailureResponse::class);
+
+    (new LaravelCorsResolverServiceProvider($this->app))->register();
+
+    expect($this->app->make(CorsFailureResponse::class))->toBeInstanceOf(ProviderTestFailureResponse::class);
+});
+
+it('adapts a configured failure response closure', function (): void {
+    $this->app['config']->set(
+        'cors-resolver.failure_response',
+        static fn (Request $request, CorsFailure $failure): Response => new Response('', $failure->status),
+    );
+
+    (new LaravelCorsResolverServiceProvider($this->app))->register();
+
+    $response = $this->app->make(CorsFailureResponse::class)->respond(
+        Request::create('/api/resource'),
+        new CorsFailure('test', 418, true),
+    );
+
+    expect($response->getStatusCode())->toBe(418);
+});
+
 it('registers an enabled cache with its configured options', function (): void {
     $this->app['config']->set('cors-resolver.cache', [
         'enabled' => true,
@@ -101,6 +128,7 @@ it('rejects invalid configuration values during provider registration', function
 })->with([
     ['cors-resolver.paths.0', '', 'paths must contain only non-empty strings'],
     ['cors-resolver.failure_mode', 'invalid', 'failure_mode'],
+    ['cors-resolver.failure_response', stdClass::class, 'failure_response'],
     ['cors-resolver.observability', 'invalid', 'observability must be an array'],
     ['cors-resolver.observability.enabled', 'yes', 'observability.enabled'],
     ['cors-resolver.cache', 'invalid', 'cache must be an array'],
@@ -128,5 +156,13 @@ final class ProviderTestCorsResolver implements CorsResolver
     public function resolve(Request $request): CorsPolicy
     {
         return CorsPolicy::deny();
+    }
+}
+
+final class ProviderTestFailureResponse implements CorsFailureResponse
+{
+    public function respond(Request $request, CorsFailure $failure): Response
+    {
+        return new Response('', $failure->status);
     }
 }

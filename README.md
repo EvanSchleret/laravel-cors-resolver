@@ -35,6 +35,7 @@ return [
     'resolver' => App\Cors\SiteCorsResolver::class,
     'failure_mode' => 'deny',
     'resolver_exception_mode' => 'deny',
+    'failure_response' => null,
     'observability' => [
         'enabled' => true,
     ],
@@ -59,6 +60,8 @@ return [
 Configuration is validated while the service provider registers. Invalid paths, resolver declarations, failure modes, cache settings, namespaces, versions, and lock durations fail startup with a `CorsConfigurationException` instead of being silently coerced.
 
 Resolver exceptions use `resolver_exception_mode`. The default `deny` mode returns `503 Service Unavailable`, adds only the appropriate `Vary` headers, does not invoke the application, and does not expose the exception. `throw` rethrows the original exception to Laravel's exception handler. Cache failures are not treated as resolver failures and are allowed to propagate.
+
+Failure responses can be customized with a class implementing `CorsFailureResponse` or with a closure accepting `(Request $request, CorsFailure $failure)` and returning a Symfony `Response`. The package always adds the required `Vary` headers after the custom response. If the custom responder throws, the package falls back to the default fail-closed response.
 
 The package dispatches three events when observability is enabled:
 
@@ -158,8 +161,9 @@ Laravel 12 and 13 applications configure middleware in `bootstrap/app.php`. The 
 - Origins are compared as normalized, exact HTTP origins. Trailing slashes are removed, schemes and hosts are lowercased, and default ports are normalized.
 - Wildcards are explicit. `*` and `https://*.example.com` are supported. A subdomain wildcard matches exactly one DNS label, and no origin wildcard, method wildcard, or header wildcard can be combined with credentials.
 - Credentials always return the requesting origin, never `*`.
+- Private Network Access is opt-in per policy with `->allowPrivateNetwork()`. An allowed PNA preflight must include `Access-Control-Request-Private-Network: true` and receives `Access-Control-Allow-Private-Network: true`.
 - Unknown origins receive no CORS headers. Invalid preflights are denied by default.
-- `Vary: Origin` is added to actual CORS responses. Preflight responses also vary by `Access-Control-Request-Method` and `Access-Control-Request-Headers`.
+- `Vary: Origin` is added to actual CORS responses. Preflight responses also vary by `Access-Control-Request-Method`, `Access-Control-Request-Headers`, and `Access-Control-Request-Private-Network`.
 - CORS is not authentication or authorization. Continue to use Laravel authentication, authorization, CSRF protection, rate limiting, and input validation.
 - Preflight resolution must not require an authenticated user. Resolve from the route, host, origin, public tenant identifier, or another value available before authentication.
 - A resolver must return `CorsPolicy::deny()` when there is no applicable policy.
@@ -178,6 +182,7 @@ $context = CorsResolverContext::fromRequest(
 );
 
 app(CorsPolicyCache::class)->forget($context);
+app(CorsPolicyCache::class)->invalidateContext($context);
 ```
 
 Invalidate every cached policy for a resolver or tenant when its CORS configuration changes:
@@ -194,6 +199,8 @@ app(CorsPolicyCache::class)->invalidateTenant(
 Resolver and tenant invalidation uses persistent generation keys, so it works with cache stores that do not support tags. Existing policy entries become unreachable immediately and expire normally according to their configured TTL.
 
 Do not cache policies that depend on mutable state not represented by the request fingerprint unless your application invalidates the entry when that state changes.
+
+`forget` and `invalidateContext` invalidate one known request context. `invalidateResolver` invalidates all contexts for a resolver, while `invalidateTenant` invalidates all contexts for a tenant, optionally limited to one resolver. These methods are safe for application-level configuration change handlers and do not require cache tags.
 
 ## Known limitations
 

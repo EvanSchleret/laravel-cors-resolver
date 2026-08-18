@@ -2,12 +2,15 @@
 
 declare(strict_types=1);
 
+use EvanSchleret\LaravelCorsResolver\CorsFailure;
 use EvanSchleret\LaravelCorsResolver\CorsPolicy;
 use EvanSchleret\LaravelCorsResolver\CorsResolverContext;
 use EvanSchleret\LaravelCorsResolver\Resolvers\ClosureCorsResolver;
 use EvanSchleret\LaravelCorsResolver\Resolvers\NullCorsResolver;
 use EvanSchleret\LaravelCorsResolver\Resolvers\RouteParameterCorsResolver;
+use EvanSchleret\LaravelCorsResolver\Responses\ClosureCorsFailureResponse;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\Response;
 
 it('returns a deny policy from the null resolver', function (): void {
     expect((new NullCorsResolver)->resolve(Request::create('/api/resource')))
@@ -49,4 +52,11 @@ it('normalizes and validates resolver context cache segments', function (): void
         ->toThrow(InvalidArgumentException::class)
         ->and(fn (): CorsResolverContext => $context->cacheKey('invalid/value'))
         ->toThrow(InvalidArgumentException::class);
+});
+
+it('rejects invalid closure failure responses', function (): void {
+    $resolver = new ClosureCorsFailureResponse(static fn (Request $request, CorsFailure $failure): ?Response => null);
+
+    expect(fn (): Response => $resolver->respond(Request::create('/api/resource'), new CorsFailure('test', 403, true)))
+        ->toThrow(UnexpectedValueException::class);
 });

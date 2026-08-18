@@ -22,6 +22,7 @@ final class CorsPolicy
         private readonly array $exposedHeaders,
         private readonly int $maxAge,
         private readonly bool $allowCredentials,
+        private readonly bool $allowPrivateNetwork = false,
     ) {}
 
     public static function make(): self
@@ -74,6 +75,11 @@ final class CorsPolicy
         }
 
         return $this->with(allowCredentials: $allow);
+    }
+
+    public function allowPrivateNetwork(bool $allow = true): self
+    {
+        return $this->with(allowPrivateNetwork: $allow);
     }
 
     public function allowsOrigin(string $origin): bool
@@ -146,6 +152,11 @@ final class CorsPolicy
         return $this->allowCredentials;
     }
 
+    public function allowsPrivateNetwork(): bool
+    {
+        return $this->allowPrivateNetwork;
+    }
+
     public function allowsAllOrigins(): bool
     {
         return in_array('*', $this->allowedOrigins, true);
@@ -161,6 +172,7 @@ final class CorsPolicy
             'exposed_headers' => $this->exposedHeaders,
             'max_age' => $this->maxAge,
             'allow_credentials' => $this->allowCredentials,
+            'allow_private_network' => $this->allowPrivateNetwork,
         ];
     }
 
@@ -177,6 +189,7 @@ final class CorsPolicy
         ?array $exposedHeaders = null,
         ?int $maxAge = null,
         ?bool $allowCredentials = null,
+        ?bool $allowPrivateNetwork = null,
     ): self {
         $policy = new self(
             $allowedOrigins ?? $this->allowedOrigins,
@@ -185,6 +198,7 @@ final class CorsPolicy
             $exposedHeaders ?? $this->exposedHeaders,
             $maxAge ?? $this->maxAge,
             $allowCredentials ?? $this->allowCredentials,
+            $allowPrivateNetwork ?? $this->allowPrivateNetwork,
         );
 
         if ($policy->allowCredentials && ($policy->containsWildcard($policy->allowedOrigins) || $policy->containsWildcard($policy->allowedMethods) || $policy->containsWildcard($policy->allowedHeaders))) {

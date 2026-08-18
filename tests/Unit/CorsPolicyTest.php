@@ -79,6 +79,7 @@ it('supports the complete policy builder API', function (): void {
             'exposed_headers' => ['x-request-id'],
             'max_age' => 600,
             'allow_credentials' => false,
+            'allow_private_network' => false,
         ]);
 });
 
@@ -88,6 +89,11 @@ it('supports wildcard origins without credentials', function (): void {
     expect($policy->allowsAllOrigins())->toBeTrue()
         ->and($policy->allowsOrigin('https://any.example'))->toBeTrue()
         ->and($policy->allowsCredentials())->toBeFalse();
+});
+
+it('supports explicit private network access', function (): void {
+    expect(CorsPolicy::make()->allowPrivateNetwork()->allowsPrivateNetwork())->toBeTrue()
+        ->and(CorsPolicy::make()->allowsPrivateNetwork())->toBeFalse();
 });
 
 it('rejects invalid policy tokens and max ages', function (): void {

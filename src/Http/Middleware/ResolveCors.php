@@ -6,6 +6,8 @@ namespace EvanSchleret\LaravelCorsResolver\Http\Middleware;
 
 use Closure;
 use EvanSchleret\LaravelCorsResolver\Cache\CorsPolicyCache;
+use EvanSchleret\LaravelCorsResolver\CorsFailure;
+use EvanSchleret\LaravelCorsResolver\CorsFailureResponse;
 use EvanSchleret\LaravelCorsResolver\CorsPolicy;
 use EvanSchleret\LaravelCorsResolver\CorsResolver;
 use EvanSchleret\LaravelCorsResolver\CorsResolverContext;
@@ -28,6 +30,7 @@ final class ResolveCors
         private readonly CorsPolicyCache $cache,
         private readonly ConfigRepository $config,
         private readonly ?Dispatcher $events = null,
+        private readonly ?CorsFailureResponse $failureResponse = null,
     ) {}
 
     public function handle(Request $request, Closure $next): Response
@@ -89,6 +92,9 @@ final class ResolveCors
     private function handlePreflight(Request $request, Closure $next, CorsPolicy $policy, string $origin): Response
     {
         $requestedMethod = strtoupper(trim((string) $request->headers->get('Access-Control-Request-Method')));
+        $privateNetworkHeader = $request->headers->get('Access-Control-Request-Private-Network');
+        $privateNetworkRequested = $privateNetworkHeader !== null && trim($privateNetworkHeader) !== '';
+        $privateNetworkValid = ! $privateNetworkRequested || strtolower(trim($privateNetworkHeader)) === 'true';
         $headersValid = true;
 
         try {
@@ -101,34 +107,46 @@ final class ResolveCors
         if (! $headersValid) {
             $this->recordDenied($request, $origin, 'invalid_requested_headers', true, $requestedMethod);
 
-            return new Response('', Response::HTTP_FORBIDDEN, [
-                'Vary' => 'Origin, Access-Control-Request-Method, Access-Control-Request-Headers',
-            ]);
+            return $this->failureResponse(
+                $request,
+                new CorsFailure('invalid_requested_headers', Response::HTTP_FORBIDDEN, true),
+            );
         }
 
         $allowed = $requestedMethod !== ''
             && $policy->allowsOrigin($origin)
             && $policy->allowsMethod($requestedMethod)
-            && $policy->allowsHeaders($requestedHeaders);
+            && $policy->allowsHeaders($requestedHeaders)
+            && $privateNetworkValid
+            && (! $privateNetworkRequested || $policy->allowsPrivateNetwork());
 
         if (! $allowed) {
-            $this->recordDenied($request, $origin, $this->preflightDenialReason($policy, $origin, $requestedMethod, $requestedHeaders), true, $requestedMethod);
+            $reason = $this->preflightDenialReason(
+                $policy,
+                $origin,
+                $requestedMethod,
+                $requestedHeaders,
+                $privateNetworkRequested,
+                $privateNetworkValid,
+            );
+            $this->recordDenied($request, $origin, $reason, true, $requestedMethod);
 
             if ($this->failureMode() === 'passthrough') {
                 $response = $next($request);
-                $this->addVary($response, ['Origin', 'Access-Control-Request-Method', 'Access-Control-Request-Headers']);
+                $this->addVary($response, $this->preflightVaryHeaders());
 
                 return $response;
             }
 
-            return new Response('', Response::HTTP_FORBIDDEN, [
-                'Vary' => 'Origin, Access-Control-Request-Method, Access-Control-Request-Headers',
-            ]);
+            return $this->failureResponse(
+                $request,
+                new CorsFailure($reason, Response::HTTP_FORBIDDEN, true),
+            );
         }
 
         $response = new Response('', Response::HTTP_NO_CONTENT);
-        $this->addVary($response, ['Origin', 'Access-Control-Request-Method', 'Access-Control-Request-Headers']);
-        $this->addPreflightHeaders($response, $policy, $origin, $requestedHeaders);
+        $this->addVary($response, $this->preflightVaryHeaders());
+        $this->addPreflightHeaders($response, $policy, $origin, $requestedHeaders, $privateNetworkRequested);
 
         return $response;
     }
@@ -147,7 +165,7 @@ final class ResolveCors
     }
 
     /** @param list<string> $requestedHeaders */
-    private function addPreflightHeaders(Response $response, CorsPolicy $policy, string $origin, array $requestedHeaders): void
+    private function addPreflightHeaders(Response $response, CorsPolicy $policy, string $origin, array $requestedHeaders, bool $privateNetworkRequested): void
     {
         $response->headers->set('Access-Control-Allow-Origin', $this->responseOrigin($policy, $origin));
         $response->headers->set('Access-Control-Allow-Methods', implode(', ', $policy->allowedMethods()));
@@ -156,6 +174,10 @@ final class ResolveCors
 
         if ($policy->allowsCredentials()) {
             $response->headers->set('Access-Control-Allow-Credentials', 'true');
+        }
+
+        if ($privateNetworkRequested && $policy->allowsPrivateNetwork()) {
+            $response->headers->set('Access-Control-Allow-Private-Network', 'true');
         }
     }
 
@@ -301,19 +323,32 @@ final class ResolveCors
             throw $exception;
         }
 
-        $response = new Response('', Response::HTTP_SERVICE_UNAVAILABLE);
-        $this->addVary($response, $request->isMethod('OPTIONS')
-            ? ['Origin', 'Access-Control-Request-Method', 'Access-Control-Request-Headers']
-            : ['Origin']);
-
-        return $response;
+        return $this->failureResponse(
+            $request,
+            new CorsFailure(
+                'resolver_failed',
+                Response::HTTP_SERVICE_UNAVAILABLE,
+                $request->isMethod('OPTIONS'),
+                $exception->getPrevious() instanceof Throwable ? $exception->getPrevious() : $exception,
+            ),
+        );
     }
 
     /** @param list<string> $requestedHeaders */
-    private function preflightDenialReason(CorsPolicy $policy, string $origin, string $requestedMethod, array $requestedHeaders): string
-    {
+    private function preflightDenialReason(
+        CorsPolicy $policy,
+        string $origin,
+        string $requestedMethod,
+        array $requestedHeaders,
+        bool $privateNetworkRequested,
+        bool $privateNetworkValid,
+    ): string {
         if ($requestedMethod === '') {
             return 'invalid_requested_method';
+        }
+
+        if (! $privateNetworkValid) {
+            return 'invalid_private_network_request';
         }
 
         if (! $policy->allowsOrigin($origin)) {
@@ -328,7 +363,40 @@ final class ResolveCors
             return 'headers_not_allowed';
         }
 
+        if ($privateNetworkRequested && ! $policy->allowsPrivateNetwork()) {
+            return 'private_network_not_allowed';
+        }
+
         return 'preflight_denied';
+    }
+
+    /** @return list<string> */
+    private function preflightVaryHeaders(): array
+    {
+        return [
+            'Origin',
+            'Access-Control-Request-Method',
+            'Access-Control-Request-Headers',
+            'Access-Control-Request-Private-Network',
+        ];
+    }
+
+    private function failureResponse(Request $request, CorsFailure $failure): Response
+    {
+        if ($this->failureResponse !== null) {
+            try {
+                $response = $this->failureResponse->respond($request, $failure);
+                $this->addVary($response, $failure->preflight ? $this->preflightVaryHeaders() : ['Origin']);
+
+                return $response;
+            } catch (Throwable) {
+            }
+        }
+
+        $response = new Response('', $failure->status);
+        $this->addVary($response, $failure->preflight ? $this->preflightVaryHeaders() : ['Origin']);
+
+        return $response;
     }
 
     private function recordDenied(Request $request, string $origin, string $reason, bool $preflight, ?string $requestedMethod = null): void

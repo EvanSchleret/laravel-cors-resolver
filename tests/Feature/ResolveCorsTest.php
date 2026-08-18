@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use EvanSchleret\LaravelCorsResolver\Cache\CorsPolicyCache;
+use EvanSchleret\LaravelCorsResolver\CorsFailure;
+use EvanSchleret\LaravelCorsResolver\CorsFailureResponse;
 use EvanSchleret\LaravelCorsResolver\CorsPolicy;
 use EvanSchleret\LaravelCorsResolver\CorsResolverContext;
 use EvanSchleret\LaravelCorsResolver\Events\CorsPolicyCacheMissed;
@@ -80,7 +82,95 @@ it('handles an allowed preflight', function (): void {
         ->and($response->headers->get('Access-Control-Allow-Methods'))->toBe('POST, OPTIONS')
         ->and($response->headers->get('Access-Control-Allow-Headers'))->toBe('content-type, accept')
         ->and($response->headers->get('Access-Control-Max-Age'))->toBe('300')
-        ->and($response->headers->get('Vary'))->toBe('Origin, Access-Control-Request-Method, Access-Control-Request-Headers');
+        ->and($response->headers->get('Vary'))->toBe('Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Access-Control-Request-Private-Network');
+});
+
+it('supports an explicitly allowed private network preflight', function (): void {
+    $middleware = makeCorsMiddleware(new ClosureCorsResolver(
+        fn (Request $request): CorsPolicy => CorsPolicy::make()
+            ->allowOrigins(['https://example.com'])
+            ->allowMethods(['POST', 'OPTIONS'])
+            ->allowPrivateNetwork()
+    ));
+
+    $response = $middleware->handle(
+        makeRequest('OPTIONS', 'https://example.com', [
+            'Access-Control-Request-Method' => 'POST',
+            'Access-Control-Request-Private-Network' => 'true',
+        ]),
+        nextResponse(),
+    );
+
+    expect($response->getStatusCode())->toBe(204)
+        ->and($response->headers->get('Access-Control-Allow-Private-Network'))->toBe('true')
+        ->and($response->headers->get('Vary'))->toContain('Access-Control-Request-Private-Network');
+});
+
+it('denies private network preflights without explicit policy support', function (): void {
+    $middleware = makeCorsMiddleware(new ClosureCorsResolver(
+        fn (Request $request): CorsPolicy => CorsPolicy::make()
+            ->allowOrigins(['https://example.com'])
+            ->allowMethods(['POST', 'OPTIONS'])
+    ));
+
+    $response = $middleware->handle(
+        makeRequest('OPTIONS', 'https://example.com', [
+            'Access-Control-Request-Method' => 'POST',
+            'Access-Control-Request-Private-Network' => 'true',
+        ]),
+        nextResponse(),
+    );
+
+    expect($response->getStatusCode())->toBe(403)
+        ->and($response->headers->has('Access-Control-Allow-Private-Network'))->toBeFalse();
+});
+
+it('uses a custom failure response while preserving security vary headers', function (): void {
+    $failureResponse = new class implements CorsFailureResponse
+    {
+        public function respond(Request $request, CorsFailure $failure): Response
+        {
+            return new Response($failure->reason, 418);
+        }
+    };
+    $middleware = makeCorsMiddleware(
+        new ClosureCorsResolver(
+            fn (Request $request): CorsPolicy => CorsPolicy::make()->allowOrigins(['https://example.com'])
+        ),
+        failureResponse: $failureResponse,
+    );
+
+    $response = $middleware->handle(
+        makeRequest('OPTIONS', 'https://unknown.example', ['Access-Control-Request-Method' => 'POST']),
+        nextResponse(),
+    );
+
+    expect($response->getStatusCode())->toBe(418)
+        ->and($response->getContent())->toBe('origin_not_allowed')
+        ->and($response->headers->get('Vary'))->toBe('Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Access-Control-Request-Private-Network');
+});
+
+it('falls back to the default failure response when customization fails', function (): void {
+    $failureResponse = new class implements CorsFailureResponse
+    {
+        public function respond(Request $request, CorsFailure $failure): Response
+        {
+            throw new RuntimeException('failure responder failed');
+        }
+    };
+    $middleware = makeCorsMiddleware(
+        new ClosureCorsResolver(
+            fn (Request $request): CorsPolicy => CorsPolicy::make()->allowOrigins(['https://example.com'])
+        ),
+        failureResponse: $failureResponse,
+    );
+
+    $response = $middleware->handle(
+        makeRequest('OPTIONS', 'https://unknown.example', ['Access-Control-Request-Method' => 'POST']),
+        nextResponse(),
+    );
+
+    expect($response->getStatusCode())->toBe(403);
 });
 
 it('resolves methods and headers dynamically from the request', function (): void {
@@ -191,7 +281,7 @@ it('passes denied preflights through when configured', function (): void {
     );
 
     expect($response->getStatusCode())->toBe(418)
-        ->and($response->headers->get('Vary'))->toBe('Origin, Access-Control-Request-Method, Access-Control-Request-Headers');
+        ->and($response->headers->get('Vary'))->toBe('Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Access-Control-Request-Private-Network');
 });
 
 it('supports credentials and rejects dangerous wildcards', function (): void {
@@ -342,7 +432,7 @@ it('fails closed for an exception raised during an OPTIONS request', function ()
     );
 
     expect($response->getStatusCode())->toBe(Response::HTTP_SERVICE_UNAVAILABLE)
-        ->and($response->headers->get('Vary'))->toBe('Origin, Access-Control-Request-Method, Access-Control-Request-Headers');
+        ->and($response->headers->get('Vary'))->toBe('Origin, Access-Control-Request-Method, Access-Control-Request-Headers, Access-Control-Request-Private-Network');
 });
 
 it('dispatches an event when a CORS request is denied', function (): void {
@@ -501,7 +591,7 @@ it('supports explicit cache invalidation', function (): void {
 
     $middleware->handle($request, nextResponse());
     $context = CorsResolverContext::fromRequest($request, ClosureCorsResolver::class, ['api/*']);
-    $cache->forget($context);
+    $cache->invalidateContext($context);
     $middleware->handle($request, nextResponse());
 
     expect($count)->toBe(2);

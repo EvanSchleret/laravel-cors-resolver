@@ -6,11 +6,13 @@ namespace EvanSchleret\LaravelCorsResolver\Providers;
 
 use Closure;
 use EvanSchleret\LaravelCorsResolver\Cache\CorsPolicyCache;
+use EvanSchleret\LaravelCorsResolver\CorsFailureResponse;
 use EvanSchleret\LaravelCorsResolver\CorsResolver;
 use EvanSchleret\LaravelCorsResolver\Exceptions\CorsConfigurationException;
 use EvanSchleret\LaravelCorsResolver\Http\Middleware\ResolveCors;
 use EvanSchleret\LaravelCorsResolver\Resolvers\ClosureCorsResolver;
 use EvanSchleret\LaravelCorsResolver\Resolvers\NullCorsResolver;
+use EvanSchleret\LaravelCorsResolver\Responses\ClosureCorsFailureResponse;
 use Illuminate\Contracts\Cache\Repository;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Foundation\Application;
@@ -29,6 +31,28 @@ final class LaravelCorsResolverServiceProvider extends ServiceProvider
         }
 
         $this->validateConfiguration($configuration);
+
+        $this->app->singleton(CorsFailureResponse::class, function (Application $app): ?CorsFailureResponse {
+            $configured = $app->make('config')->get('cors-resolver.failure_response');
+
+            if ($configured instanceof CorsFailureResponse) {
+                return $configured;
+            }
+
+            if ($configured instanceof Closure) {
+                return new ClosureCorsFailureResponse($configured);
+            }
+
+            if ($configured === null) {
+                return null;
+            }
+
+            if (! is_string($configured) || ! is_a($configured, CorsFailureResponse::class, true)) {
+                throw new CorsConfigurationException('cors-resolver.failure_response must be a CorsFailureResponse class, closure, or null.');
+            }
+
+            return $app->make($configured);
+        });
 
         $this->app->singleton(CorsResolver::class, function (Application $app): CorsResolver {
             $configured = $app->make('config')->get('cors-resolver.resolver');
@@ -107,6 +131,7 @@ final class LaravelCorsResolverServiceProvider extends ServiceProvider
 
         $this->validatePaths($paths);
         $this->validateResolver($configuration['resolver'] ?? null);
+        $this->validateFailureResponse($configuration['failure_response'] ?? null);
         $this->validateMode($configuration['failure_mode'] ?? 'deny', 'failure_mode', ['deny', 'passthrough']);
         $this->validateMode($configuration['resolver_exception_mode'] ?? 'deny', 'resolver_exception_mode', ['deny', 'throw']);
 
@@ -149,6 +174,20 @@ final class LaravelCorsResolverServiceProvider extends ServiceProvider
 
         if (! is_string($resolver) || ! class_exists($resolver) || ! is_a($resolver, CorsResolver::class, true) || ! (new ReflectionClass($resolver))->isInstantiable()) {
             throw new CorsConfigurationException('cors-resolver.resolver must be a CorsResolver class, closure, or null.');
+        }
+    }
+
+    private function validateFailureResponse(mixed $failureResponse): void
+    {
+        if ($failureResponse instanceof CorsFailureResponse || $failureResponse instanceof Closure || $failureResponse === null) {
+            return;
+        }
+
+        if (! is_string($failureResponse)
+            || ! class_exists($failureResponse)
+            || ! is_a($failureResponse, CorsFailureResponse::class, true)
+            || ! (new ReflectionClass($failureResponse))->isInstantiable()) {
+            throw new CorsConfigurationException('cors-resolver.failure_response must be a CorsFailureResponse class, closure, or null.');
         }
     }
 

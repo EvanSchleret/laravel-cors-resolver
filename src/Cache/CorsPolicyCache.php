@@ -86,6 +86,11 @@ final class CorsPolicyCache
         return $this->store?->forget($this->effectiveKey($context)) ?? false;
     }
 
+    public function invalidateContext(CorsResolverContext $context): bool
+    {
+        return $this->forget($context);
+    }
+
     public function forgetByKey(string $key): bool
     {
         return $this->store?->forget($key) ?? false;
