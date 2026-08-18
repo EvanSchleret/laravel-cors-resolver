@@ -1,0 +1,51 @@
+# Changelog
+
+All notable changes to `lara-mjml` will be documented in this file.
+
+## v1.0.0 - 2026-08-18
+
+### ✨ Highlights
+
+#### 🌟 Dynamic, request-aware CORS policies
+
+Resolve a dedicated CORS policy for every request using custom resolvers, closures, route parameters, tenant context, external configuration, or application-specific logic.
+
+```php
+CorsPolicy::make()
+    ->allowOrigins(['https://app.example.com'])
+    ->allowMethods(['POST', 'OPTIONS'])
+    ->allowHeaders(['Content-Type', 'Accept']);
+```
+
+#### 🔒 Secure multi-tenant caching and preflight handling
+
+The middleware strictly validates origins and preflight headers, supports tenant- and resolver-scoped cache invalidation, and prevents concurrent policy recomputation.
+
+#### 🧩 Extensible Laravel integration
+
+The package supports Laravel 12 and 13, PHP 8.3–8.5, Laravel's HTTP kernel, long-lived workers, observability events, customizable failure responses, and opt-in Private Network Access.
+
+> 💡 **Tip**
+>
+> Register `ResolveCors` instead of Laravel's native `HandleCors` for the paths handled by this package.
+
+### 🚀 Features
+
+- **CORS resolver**: Add dynamic request-aware policies through `CorsResolver`, closures, route parameters, or custom implementations. [(94b41d6)](https://github.com/EvanSchleret/laravel-cors-resolver/commit/94b41d64008b5894755830949ce0df930caf2d59)
+- **Cache scoping**: Namespace and version cache keys, with resolver- and tenant-specific invalidation support. [(eb6e922)](https://github.com/EvanSchleret/laravel-cors-resolver/commit/eb6e92289abb9f20d78107e120e3d5794b7e0ced)
+- **Concurrent resolution**: Protect cache misses with locks to prevent duplicate policy recomputation. [(c0b37e3)](https://github.com/EvanSchleret/laravel-cors-resolver/commit/c0b37e38511332c0df18a85c3cd835b001ee2ebb)
+- **Configuration safety**: Validate package configuration at startup and provide explicit resolver exception handling modes. [(1cc4f33)](https://github.com/EvanSchleret/laravel-cors-resolver/commit/1cc4f330bdcd33d518cf37e25033e0ad8a73b1fc)
+- **Observability**: Dispatch events for denied requests, resolver failures, and cache misses. [(c7e8d23)](https://github.com/EvanSchleret/laravel-cors-resolver/commit/c7e8d23865241ddca74f8d9e2b89016acdf646b0)
+- **Compatibility**: Support PHP 8.3 through 8.5 with Laravel 12 and Laravel 13. [(b1fede4)](https://github.com/EvanSchleret/laravel-cors-resolver/commit/b1fede42548a670788b27873ff0325c36827a2e7)
+- **Public APIs**: Add business-level context invalidation, customizable failure responses, and opt-in Private Network Access support. [(2d0d96)](https://github.com/EvanSchleret/laravel-cors-resolver/commit/2d0d96478662254b2f6df7822ec4d31d5e3eb413)
+
+### 🐛 Bug Fixes
+
+- **Preflight validation**: Reject malformed requested headers before invoking the application. [(70507e0)](https://github.com/EvanSchleret/laravel-cors-resolver/commit/70507e078c6aa121fc3d74131bb59c29f2a8e096)
+- **Origin normalization**: Harden origin parsing, normalization, wildcard matching, ports, IP addresses, and ambiguous input rejection. [(9a490e0)](https://github.com/EvanSchleret/laravel-cors-resolver/commit/9a490e04762c7ced91152be4ccb3ad9b0bca109e)
+
+### ❤️ Contributors
+
+- @EvanSchleret
+
+Full Changelog: [Initial release → v1.0.0](https://github.com/EvanSchleret/laravel-cors-resolver/commits/main)
