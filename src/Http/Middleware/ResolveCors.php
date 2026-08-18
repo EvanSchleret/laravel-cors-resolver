@@ -9,10 +9,13 @@ use EvanSchleret\LaravelCorsResolver\Cache\CorsPolicyCache;
 use EvanSchleret\LaravelCorsResolver\CorsPolicy;
 use EvanSchleret\LaravelCorsResolver\CorsResolver;
 use EvanSchleret\LaravelCorsResolver\CorsResolverContext;
+use EvanSchleret\LaravelCorsResolver\Events\CorsRequestDenied;
+use EvanSchleret\LaravelCorsResolver\Events\CorsResolverFailed;
 use EvanSchleret\LaravelCorsResolver\Exceptions\CorsConfigurationException;
 use EvanSchleret\LaravelCorsResolver\Exceptions\CorsResolverException;
 use EvanSchleret\LaravelCorsResolver\Support\OriginNormalizer;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
+use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\Response;
@@ -24,6 +27,7 @@ final class ResolveCors
         private readonly CorsResolver $resolver,
         private readonly CorsPolicyCache $cache,
         private readonly ConfigRepository $config,
+        private readonly ?Dispatcher $events = null,
     ) {}
 
     public function handle(Request $request, Closure $next): Response
@@ -46,7 +50,15 @@ final class ResolveCors
         try {
             $policy = $this->cache->remember($context, fn (): CorsPolicy => $this->resolvePolicy($request));
         } catch (CorsResolverException $exception) {
-            return $this->handleResolverException($request, $exception);
+            $mode = $this->resolverExceptionMode();
+            $original = $exception->getPrevious();
+            $this->dispatch(new CorsResolverFailed(
+                $request,
+                $original instanceof Throwable ? $original : $exception,
+                $mode,
+            ));
+
+            return $this->handleResolverException($request, $exception, $mode);
         }
 
         if ($request->isMethod('OPTIONS')) {
@@ -56,8 +68,19 @@ final class ResolveCors
         $response = $next($request);
         $this->addVary($response, ['Origin']);
 
-        if ($policy->allowsOrigin($origin) && $policy->allowsMethod($request->getMethod())) {
+        $originAllowed = $policy->allowsOrigin($origin);
+        $methodAllowed = $policy->allowsMethod($request->getMethod());
+
+        if ($originAllowed && $methodAllowed) {
             $this->addActualHeaders($response, $policy, $origin);
+        } else {
+            $this->recordDenied(
+                $request,
+                $origin,
+                $originAllowed ? 'method_not_allowed' : 'origin_not_allowed',
+                false,
+                $request->getMethod(),
+            );
         }
 
         return $response;
@@ -76,6 +99,8 @@ final class ResolveCors
         }
 
         if (! $headersValid) {
+            $this->recordDenied($request, $origin, 'invalid_requested_headers', true, $requestedMethod);
+
             return new Response('', Response::HTTP_FORBIDDEN, [
                 'Vary' => 'Origin, Access-Control-Request-Method, Access-Control-Request-Headers',
             ]);
@@ -87,6 +112,8 @@ final class ResolveCors
             && $policy->allowsHeaders($requestedHeaders);
 
         if (! $allowed) {
+            $this->recordDenied($request, $origin, $this->preflightDenialReason($policy, $origin, $requestedMethod, $requestedHeaders), true, $requestedMethod);
+
             if ($this->failureMode() === 'passthrough') {
                 $response = $next($request);
                 $this->addVary($response, ['Origin', 'Access-Control-Request-Method', 'Access-Control-Request-Headers']);
@@ -262,9 +289,9 @@ final class ResolveCors
         }
     }
 
-    private function handleResolverException(Request $request, CorsResolverException $exception): Response
+    private function handleResolverException(Request $request, CorsResolverException $exception, string $mode): Response
     {
-        if ($this->resolverExceptionMode() === 'throw') {
+        if ($mode === 'throw') {
             $previous = $exception->getPrevious();
 
             if ($previous instanceof Throwable) {
@@ -280,6 +307,52 @@ final class ResolveCors
             : ['Origin']);
 
         return $response;
+    }
+
+    /** @param list<string> $requestedHeaders */
+    private function preflightDenialReason(CorsPolicy $policy, string $origin, string $requestedMethod, array $requestedHeaders): string
+    {
+        if ($requestedMethod === '') {
+            return 'invalid_requested_method';
+        }
+
+        if (! $policy->allowsOrigin($origin)) {
+            return 'origin_not_allowed';
+        }
+
+        if (! $policy->allowsMethod($requestedMethod)) {
+            return 'method_not_allowed';
+        }
+
+        if (! $policy->allowsHeaders($requestedHeaders)) {
+            return 'headers_not_allowed';
+        }
+
+        return 'preflight_denied';
+    }
+
+    private function recordDenied(Request $request, string $origin, string $reason, bool $preflight, ?string $requestedMethod = null): void
+    {
+        $this->dispatch(new CorsRequestDenied($request, $origin, $reason, $preflight, $requestedMethod));
+    }
+
+    private function dispatch(object $event): void
+    {
+        if (! $this->observabilityEnabled() || $this->events === null) {
+            return;
+        }
+
+        try {
+            $this->events->dispatch($event);
+        } catch (Throwable) {
+        }
+    }
+
+    private function observabilityEnabled(): bool
+    {
+        $configuration = $this->config->get('cors-resolver.observability', []);
+
+        return is_array($configuration) && ($configuration['enabled'] ?? true) === true;
     }
 
     /** @param list<string> $values */

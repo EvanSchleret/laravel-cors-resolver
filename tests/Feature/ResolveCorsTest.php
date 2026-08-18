@@ -5,11 +5,15 @@ declare(strict_types=1);
 use EvanSchleret\LaravelCorsResolver\Cache\CorsPolicyCache;
 use EvanSchleret\LaravelCorsResolver\CorsPolicy;
 use EvanSchleret\LaravelCorsResolver\CorsResolverContext;
+use EvanSchleret\LaravelCorsResolver\Events\CorsPolicyCacheMissed;
+use EvanSchleret\LaravelCorsResolver\Events\CorsRequestDenied;
+use EvanSchleret\LaravelCorsResolver\Events\CorsResolverFailed;
 use EvanSchleret\LaravelCorsResolver\Resolvers\ClosureCorsResolver;
 use EvanSchleret\LaravelCorsResolver\Resolvers\RouteParameterCorsResolver;
 use Illuminate\Cache\ArrayStore;
 use Illuminate\Cache\Repository as CacheRepository;
 use Illuminate\Contracts\Cache\Lock;
+use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -259,6 +263,59 @@ it('rethrows resolver exceptions when configured to throw', function (): void {
         ->toThrow(RuntimeException::class, 'resolver failed');
 });
 
+it('dispatches an event when a CORS request is denied', function (): void {
+    $events = Mockery::mock(Dispatcher::class);
+    $events->shouldReceive('dispatch')
+        ->once()
+        ->with(Mockery::on(static fn (object $event): bool => $event instanceof CorsRequestDenied
+            && $event->reason === 'origin_not_allowed'
+            && $event->origin === 'https://unknown.example'
+            && $event->preflight === false
+            && $event->requestedMethod === 'GET'))
+        ->andReturnNull();
+    $middleware = makeCorsMiddleware(
+        new ClosureCorsResolver(
+            fn (Request $request): CorsPolicy => CorsPolicy::make()->allowOrigins(['https://example.com'])
+        ),
+        configuration: [
+            'cors-resolver' => [
+                'paths' => ['api/*'],
+                'failure_mode' => 'deny',
+            ],
+        ],
+        events: $events,
+    );
+
+    $middleware->handle(makeRequest('GET', 'https://unknown.example'), nextResponse());
+});
+
+it('dispatches resolver failure events without exposing the exception', function (): void {
+    $events = Mockery::mock(Dispatcher::class);
+    $events->shouldReceive('dispatch')
+        ->once()
+        ->with(Mockery::on(static fn (object $event): bool => $event instanceof CorsResolverFailed
+            && $event->exception->getMessage() === 'resolver failed'
+            && $event->mode === 'deny'))
+        ->andReturnNull();
+    $middleware = makeCorsMiddleware(
+        new ClosureCorsResolver(function (Request $request): CorsPolicy {
+            throw new RuntimeException('resolver failed');
+        }),
+        configuration: [
+            'cors-resolver' => [
+                'paths' => ['api/*'],
+                'failure_mode' => 'deny',
+                'resolver_exception_mode' => 'deny',
+            ],
+        ],
+        events: $events,
+    );
+
+    $response = $middleware->handle(makeRequest('GET', 'https://example.com'), nextResponse());
+
+    expect($response->getStatusCode())->toBe(Response::HTTP_SERVICE_UNAVAILABLE);
+});
+
 it('rechecks the cache after acquiring a recomputation lock', function (): void {
     $store = Mockery::mock(ArrayStore::class)->makePartial();
     $repository = new CacheRepository($store);
@@ -288,6 +345,23 @@ it('rechecks the cache after acquiring a recomputation lock', function (): void 
 
     expect($result)->toBe($cachedPolicy)
         ->and($count)->toBe(0);
+});
+
+it('dispatches an event when a cached policy is missed', function (): void {
+    $events = Mockery::mock(Dispatcher::class);
+    $events->shouldReceive('dispatch')
+        ->once()
+        ->with(Mockery::on(static fn (object $event): bool => $event instanceof CorsPolicyCacheMissed
+            && $event->key !== ''))
+        ->andReturnNull();
+    $cache = new CorsPolicyCache(
+        new CacheRepository(new ArrayStore),
+        300,
+        events: $events,
+    );
+    $context = CorsResolverContext::fromRequest(makeRequest('GET', 'https://example.com'), 'resolver-a', ['api/*']);
+
+    $cache->remember($context, static fn (): CorsPolicy => CorsPolicy::make()->allowOrigins(['https://example.com']));
 });
 
 it('falls back to recomputation when the cache lock times out', function (): void {

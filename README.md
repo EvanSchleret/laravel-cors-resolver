@@ -35,6 +35,9 @@ return [
     'resolver' => App\Cors\SiteCorsResolver::class,
     'failure_mode' => 'deny',
     'resolver_exception_mode' => 'deny',
+    'observability' => [
+        'enabled' => true,
+    ],
     'cache' => [
         'enabled' => true,
         'store' => null,
@@ -56,6 +59,14 @@ return [
 Configuration is validated while the service provider registers. Invalid paths, resolver declarations, failure modes, cache settings, namespaces, versions, and lock durations fail startup with a `CorsConfigurationException` instead of being silently coerced.
 
 Resolver exceptions use `resolver_exception_mode`. The default `deny` mode returns `503 Service Unavailable`, adds only the appropriate `Vary` headers, does not invoke the application, and does not expose the exception. `throw` rethrows the original exception to Laravel's exception handler. Cache failures are not treated as resolver failures and are allowed to propagate.
+
+The package dispatches three events when observability is enabled:
+
+- `CorsRequestDenied` for rejected actual requests and preflights, with a reason such as `origin_not_allowed`, `method_not_allowed`, or `headers_not_allowed`.
+- `CorsResolverFailed` when a resolver throws, including the original exception and the configured handling mode.
+- `CorsPolicyCacheMissed` when an enabled policy cache has no matching policy.
+
+Register listeners with Laravel's event system. Set `observability.enabled` to `false` when the application does not need these events. Event listener failures are isolated from the CORS response.
 
 Caching is disabled by default. Enable it only when the resolver's result is stable for the request fingerprint and invalidate entries when external tenant configuration changes. `namespace` and `version` isolate this package's keys from other applications and provide a simple cache migration mechanism. Set `tenant_parameter` to a route parameter name when policies are tenant-specific, for example `tenant` or `account`.
 

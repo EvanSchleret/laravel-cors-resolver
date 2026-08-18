@@ -8,13 +8,14 @@ use EvanSchleret\LaravelCorsResolver\Http\Middleware\ResolveCors;
 use Illuminate\Cache\ArrayStore;
 use Illuminate\Cache\Repository as CacheRepository;
 use Illuminate\Config\Repository as ConfigRepository;
+use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Tests\TestCase;
 
 uses(TestCase::class)->in('Feature');
 
-function makeCorsMiddleware(CorsResolver $resolver, ?CorsPolicyCache $cache = null, array $configuration = []): ResolveCors
+function makeCorsMiddleware(CorsResolver $resolver, ?CorsPolicyCache $cache = null, array $configuration = [], ?Dispatcher $events = null): ResolveCors
 {
     $config = new ConfigRepository(array_merge([
         'cors-resolver' => [
@@ -23,7 +24,7 @@ function makeCorsMiddleware(CorsResolver $resolver, ?CorsPolicyCache $cache = nu
         ],
     ], $configuration));
 
-    return new ResolveCors($resolver, $cache ?? new CorsPolicyCache(null, 0), $config);
+    return new ResolveCors($resolver, $cache ?? new CorsPolicyCache(null, 0), $config, $events);
 }
 
 function makeRequest(string $method, string $origin, array $headers = []): Request

@@ -7,11 +7,14 @@ namespace EvanSchleret\LaravelCorsResolver\Cache;
 use Closure;
 use EvanSchleret\LaravelCorsResolver\CorsPolicy;
 use EvanSchleret\LaravelCorsResolver\CorsResolverContext;
+use EvanSchleret\LaravelCorsResolver\Events\CorsPolicyCacheMissed;
 use Illuminate\Contracts\Cache\Lock;
 use Illuminate\Contracts\Cache\LockProvider;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Contracts\Cache\Repository;
+use Illuminate\Contracts\Events\Dispatcher;
 use InvalidArgumentException;
+use Throwable;
 
 final class CorsPolicyCache
 {
@@ -22,6 +25,8 @@ final class CorsPolicyCache
         string|int $version = 'v1',
         private readonly int $lockSeconds = 10,
         private readonly int $lockWaitSeconds = 5,
+        private readonly ?Dispatcher $events = null,
+        private readonly bool $eventsEnabled = true,
     ) {
         if ($namespace === '' || preg_match('/^[A-Za-z0-9._-]+$/', $namespace) !== 1) {
             throw new InvalidArgumentException('The CORS cache namespace must contain only letters, numbers, dots, underscores, or hyphens.');
@@ -52,6 +57,8 @@ final class CorsPolicyCache
         if ($cached instanceof CorsPolicy) {
             return $cached;
         }
+
+        $this->dispatch(new CorsPolicyCacheMissed($context, $key));
 
         $lock = $this->lock($key);
 
@@ -157,5 +164,17 @@ final class CorsPolicyCache
         $this->store?->put($key, $policy, $this->ttl);
 
         return $policy;
+    }
+
+    private function dispatch(object $event): void
+    {
+        if (! $this->eventsEnabled || $this->events === null) {
+            return;
+        }
+
+        try {
+            $this->events->dispatch($event);
+        } catch (Throwable) {
+        }
     }
 }

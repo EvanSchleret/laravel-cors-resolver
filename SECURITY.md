@@ -20,3 +20,5 @@ The maintainers will acknowledge reports as soon as practical and coordinate a f
 CORS controls browser access to responses. It does not authenticate requests, protect server-to-server traffic, or replace authorization. Applications must keep authentication, authorization, CSRF protection, validation, and rate limiting in place.
 
 When policies are tenant-specific, configure `cache.tenant_parameter` and invalidate the tenant whenever its CORS configuration changes. Use resolver invalidation when changing resolver-wide policy logic. Cache namespaces and versions must be changed when the key contract changes. Never enable credentials with a wildcard origin.
+
+Resolver failures deny access by default with a generic `503` response and never expose exception details. Use `resolver_exception_mode: throw` only when the application's exception handler is intentionally responsible for reporting the original resolver exception.

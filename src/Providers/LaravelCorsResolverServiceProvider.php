@@ -12,6 +12,7 @@ use EvanSchleret\LaravelCorsResolver\Http\Middleware\ResolveCors;
 use EvanSchleret\LaravelCorsResolver\Resolvers\ClosureCorsResolver;
 use EvanSchleret\LaravelCorsResolver\Resolvers\NullCorsResolver;
 use Illuminate\Contracts\Cache\Repository;
+use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\ServiceProvider;
 use ReflectionClass;
@@ -68,6 +69,10 @@ final class LaravelCorsResolverServiceProvider extends ServiceProvider
             $lockEnabled = is_array($lockConfiguration) && (bool) ($lockConfiguration['enabled'] ?? true);
             $lockSeconds = $lockEnabled ? max(1, (int) ($lockConfiguration['ttl'] ?? 10)) : 0;
             $lockWaitSeconds = $lockEnabled ? max(0, (int) ($lockConfiguration['wait'] ?? 5)) : 0;
+            $observability = $app->make('config')->get('cors-resolver.observability', []);
+            $eventsEnabled = is_array($observability) && ($observability['enabled'] ?? true) === true;
+            $events = $app->bound('events') ? $app->make('events') : null;
+            $events = $events instanceof Dispatcher ? $events : null;
             $store = $storeName === null
                 ? $app->make('cache.store')
                 : $app->make('cache')->store($storeName);
@@ -76,7 +81,7 @@ final class LaravelCorsResolverServiceProvider extends ServiceProvider
                 throw new CorsConfigurationException('The configured CORS cache store must implement the cache repository contract.');
             }
 
-            return new CorsPolicyCache($store, $ttl, $namespace, $version, $lockSeconds, $lockWaitSeconds);
+            return new CorsPolicyCache($store, $ttl, $namespace, $version, $lockSeconds, $lockWaitSeconds, $events, $eventsEnabled);
         });
     }
 
@@ -104,6 +109,14 @@ final class LaravelCorsResolverServiceProvider extends ServiceProvider
         $this->validateResolver($configuration['resolver'] ?? null);
         $this->validateMode($configuration['failure_mode'] ?? 'deny', 'failure_mode', ['deny', 'passthrough']);
         $this->validateMode($configuration['resolver_exception_mode'] ?? 'deny', 'resolver_exception_mode', ['deny', 'throw']);
+
+        $observability = $configuration['observability'] ?? [];
+
+        if (! is_array($observability)) {
+            throw new CorsConfigurationException('cors-resolver.observability must be an array.');
+        }
+
+        $this->booleanValue($observability['enabled'] ?? true, 'cors-resolver.observability.enabled');
 
         $cache = $configuration['cache'] ?? [];
 

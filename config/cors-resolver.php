@@ -11,6 +11,10 @@ return [
 
     'resolver_exception_mode' => 'deny',
 
+    'observability' => [
+        'enabled' => true,
+    ],
+
     'cache' => [
         'enabled' => false,
         'store' => null,
